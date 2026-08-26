@@ -1,53 +1,65 @@
-# Tutorial: create category API endpoints
+# Tutorial: create unified category API endpoints
 
-This tutorial adds the first write operations to the Flask API:
+This tutorial matches the current database schema:
 
 ```text
-GET  /api/income-categories
-POST /api/income-categories
+categories
+  id
+  description
+  category_type     income | spending
 
-GET  /api/spending-categories
-POST /api/spending-categories
+transactions
+  id
+  amount
+  transaction_date
+  description
+  category_id       references categories.id
 ```
 
-The GET endpoints already exist. You will add the two POST endpoints yourself.
-Do not move on until you have tested each step.
+You will build two category endpoints:
+
+```text
+GET  /api/categories
+POST /api/categories
+```
+
+A category has a description and a type. The type belongs to the category, not
+to an individual transaction. A transaction's type is determined by the category
+it references.
 
 ## What we are building
 
-An API client will send JSON such as:
+A client can create a category by sending:
 
 ```json
 {
-  "description": "Salary"
+  "description": "Salary",
+  "category_type": "income"
 }
 ```
 
-Flask will validate it, create an IncomeCategory or SpendingCategory object,
-save it to MariaDB, and return the new record as JSON.
-
-For example, a successful request to POST /api/income-categories will return
-HTTP status 201 Created:
+A successful request returns HTTP status 201 Created:
 
 ```json
 {
   "data": {
     "id": 1,
-    "description": "Salary"
+    "description": "Salary",
+    "category_type": "income"
   }
 }
 ```
 
 ## Before you start
 
-From the project root, make a branch for this small piece of work:
+Make sure the new two-table schema has been applied to MariaDB. Create a branch:
 
 ```sh
+cd ~/finance-app
 git switch -c add-category-endpoints
 ```
 
-Start the Flask app if it is not already running. This project is exposed to the
-LAN, so leave debug mode off:
+Start Flask from the backend directory:
 
 ```sh
 cd backend
@@ -55,51 +67,67 @@ source .venv/bin/activate
 FLASK_DEBUG=0 flask --app run run --host 0.0.0.0 --port 5001
 ```
 
-Because debug mode is disabled, stop the server with Ctrl+C and start it again
-after each Python change.
+Restart Flask after every Python change because debug mode is off.
 
-## Step 1: understand the existing pieces
+## Step 1: create the Category model
 
-Open backend/app/models.py. The existing classes map Python objects to your
-database tables:
+Open backend/app/models.py. The old IncomeCategory and SpendingCategory classes
+should be replaced by one Category class. Add this class:
 
 ```python
-class IncomeCategory(db.Model):
-    __tablename__ = "income_categories"
+class Category(db.Model):
+    __tablename__ = "categories"
+
+    id = db.Column(db.BigInteger, primary_key=True)
+    description = db.Column(db.String(100), nullable=False)
+    category_type = db.Column(db.String(20), nullable=False)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "description": self.description,
+            "category_type": self.category_type,
+        }
 ```
 
-IncomeCategory(description="Salary") represents one row in income_categories.
-Flask-SQLAlchemy tracks it in a database session. Calling db.session.commit()
-writes the row to MariaDB.
+The model maps directly to the categories table:
 
-Open backend/app/routes.py. It already contains the api blueprint and the two
-read-only category routes. This is where the new routes belong.
+- __tablename__ selects the database table.
+- each db.Column maps to a table column.
+- to_dict converts the model into JSON-ready Python data.
 
-## Step 2: import what a POST route needs
+The database uses ENUM for category_type. A string column in SQLAlchemy works
+well here because it reads and writes the ENUM values as ordinary Python strings.
 
-At the top of backend/app/routes.py, change the imports to:
+## Step 2: import the tools used by POST routes
+
+Open backend/app/routes.py. At the top, use these imports:
 
 ```python
 from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+
+from .extensions import db
+from .models import Category
 ```
 
 Why:
 
-- request gives a route access to the incoming JSON body.
-- IntegrityError is raised when MariaDB rejects an insert, including when a
-  category description violates your UNIQUE constraint.
-- SQLAlchemyError is still used by the health check.
+- request reads the JSON sent to Flask;
+- IntegrityError lets the API handle the database UNIQUE constraint cleanly;
+- Category is the one model used by these routes.
 
-## Step 3: write one reusable validation-and-save helper
+## Step 3: add a category creation helper
 
-Add this function below api = Blueprint("api", __name__) and above the route
-functions:
+Below api = Blueprint("api", __name__), add:
 
 ```python
-def create_category(model):
-    """Validate a category request and save an instance of the supplied model."""
+CATEGORY_TYPES = {"income", "spending"}
+
+
+def create_category():
+    """Validate and create one category."""
     data = request.get_json(silent=True)
 
     if not isinstance(data, dict):
@@ -116,7 +144,14 @@ def create_category(model):
     if len(description) > 100:
         return jsonify({"error": "description cannot exceed 100 characters."}), 400
 
-    category = model(description=description)
+    category_type = data.get("category_type")
+    if category_type not in CATEGORY_TYPES:
+        return jsonify({"error": "category_type must be income or spending."}), 400
+
+    category = Category(
+        description=description,
+        category_type=category_type,
+    )
     db.session.add(category)
 
     try:
@@ -128,144 +163,122 @@ def create_category(model):
     return jsonify({"data": category.to_dict()}), 201
 ```
 
-### Why validate in the API and database?
+### Why validate twice?
 
-The API validation gives the caller a helpful message before attempting a bad
-write. The database UNIQUE constraint is still essential: it is the final
-authority and prevents duplicates even if two requests arrive at the same time.
+The API validation gives callers helpful errors. The database constraint remains
+the final authority. It prevents duplicate descriptions even if two requests
+arrive at nearly the same time.
 
-db.session.rollback() is important. A failed commit leaves a SQLAlchemy session
-in an error state; rolling it back makes it safe to use for the next request.
+After a failed commit, db.session.rollback() is required. Without it, the session
+is left in an error state and later database work in the request can fail.
 
-The helper accepts model so the same logic can create either type of category
-without copying the validation code.
+## Step 4: add the list and create routes
 
-## Step 4: add the income category POST route
-
-Add this route below list_income_categories:
+Add these routes below the health check:
 
 ```python
-@api.post("/income-categories")
-def create_income_category():
-    return create_category(IncomeCategory)
+@api.get("/categories")
+def list_categories():
+    category_type = request.args.get("type")
+
+    query = Category.query.order_by(Category.category_type, Category.description)
+    if category_type is not None:
+        if category_type not in CATEGORY_TYPES:
+            return jsonify({"error": "type must be income or spending."}), 400
+        query = query.filter_by(category_type=category_type)
+
+    categories = query.all()
+    return jsonify({"data": [category.to_dict() for category in categories]})
+
+
+@api.post("/categories")
+def create_category_route():
+    return create_category()
 ```
 
-@api.post(...) means this function only handles HTTP POST requests. Passing
-IncomeCategory to the helper tells it which MariaDB table to use.
+The optional query parameter lets one endpoint serve both use cases:
 
-## Step 5: add the spending category POST route
-
-Add this route below list_spending_categories:
-
-```python
-@api.post("/spending-categories")
-def create_spending_category():
-    return create_category(SpendingCategory)
+```text
+GET /api/categories
+GET /api/categories?type=income
+GET /api/categories?type=spending
 ```
 
-This is intentionally almost identical to the income route. The shared helper
-keeps the behavior consistent while the route makes the API explicit and easy to
-read.
+This is simpler than maintaining separate income and spending endpoints.
 
-## Step 6: restart Flask and test with curl
+## Step 5: restart and test
 
-If Flask is running, stop it with Ctrl+C, then run:
+Restart Flask, then create categories:
 
 ```sh
-FLASK_DEBUG=0 flask --app run run --host 0.0.0.0 --port 5001
-```
-
-In a second terminal, create an income category:
-
-```sh
-curl -i -X POST http://127.0.0.1:5001/api/income-categories \
+curl -i -X POST http://127.0.0.1:5001/api/categories \
   -H 'Content-Type: application/json' \
-  -d '{"description":"Salary"}'
-```
+  -d '{"description":"Salary","category_type":"income"}'
 
-You should see HTTP/1.1 201 CREATED and the new category in the response.
-
-Create a spending category:
-
-```sh
-curl -i -X POST http://127.0.0.1:5001/api/spending-categories \
+curl -i -X POST http://127.0.0.1:5001/api/categories \
   -H 'Content-Type: application/json' \
-  -d '{"description":"Groceries"}'
+  -d '{"description":"Groceries","category_type":"spending"}'
 ```
 
-List the saved records:
+List all categories:
 
 ```sh
-curl http://127.0.0.1:5001/api/income-categories
-curl http://127.0.0.1:5001/api/spending-categories
+curl http://127.0.0.1:5001/api/categories
 ```
 
-## Step 7: deliberately test failure cases
-
-These checks confirm that your validation is behaving as intended.
-
-No JSON body:
+List one type:
 
 ```sh
-curl -i -X POST http://127.0.0.1:5001/api/income-categories
+curl 'http://127.0.0.1:5001/api/categories?type=income'
 ```
 
-Blank description:
+## Step 6: test error cases
+
+Try an invalid type:
 
 ```sh
-curl -i -X POST http://127.0.0.1:5001/api/income-categories \
+curl -i -X POST http://127.0.0.1:5001/api/categories \
   -H 'Content-Type: application/json' \
-  -d '{"description":"   "}'
+  -d '{"description":"Test","category_type":"other"}'
 ```
 
-Duplicate description:
+Try a duplicate description:
 
 ```sh
-curl -i -X POST http://127.0.0.1:5001/api/income-categories \
+curl -i -X POST http://127.0.0.1:5001/api/categories \
   -H 'Content-Type: application/json' \
-  -d '{"description":"Salary"}'
+  -d '{"description":"Salary","category_type":"income"}'
 ```
+
+Expected results:
 
 | Situation | Expected status |
 | --- | --- |
-| Valid new category | 201 Created |
-| No JSON, wrong type, blank text, or text over 100 characters | 400 Bad Request |
-| Duplicate category | 409 Conflict |
+| Valid category | 201 Created |
+| Missing or invalid fields | 400 Bad Request |
+| Duplicate description | 409 Conflict |
 
-## Step 8: inspect the result in DBeaver
-
-In DBeaver, run:
+## Step 7: inspect the data in DBeaver
 
 ```sql
-SELECT * FROM finance_dev.income_categories;
-SELECT * FROM finance_dev.spending_categories;
+SELECT id, description, category_type
+FROM finance_dev.categories
+ORDER BY category_type, description;
 ```
 
-You should see the categories created through the API. This is a useful way to
-connect what Flask did in Python with the rows stored in MariaDB.
-
-## Step 9: commit the completed milestone
-
-When every test passes:
+## Step 8: commit the milestone
 
 ```sh
 cd ~/finance-app
-git status
-git add backend/app/routes.py backend/docs/01-category-api-tutorial.md
-git commit -m "Add category creation endpoints"
+git add backend/app/models.py backend/app/routes.py \
+  backend/docs/01-category-api-tutorial.md
+git commit -m "Add unified category endpoints"
 git push -u origin add-category-endpoints
 ```
 
-If you prefer to keep the work directly on main, switch back to main before
-starting and use git push instead. For learning Git, the short-lived branch is
-worth practising.
-
 ## What comes next
 
-The next feature is POST /api/income-transactions, then its spending equivalent.
-It will build on the same flow but introduces three useful ideas:
-
-1. validating money with Python's Decimal type;
-2. parsing an ISO date such as 2026-08-25;
-3. checking that the referenced category exists before inserting the transaction.
+The next tutorial adds one transactions endpoint. It will validate Decimal money
+and dates, confirm that a category exists, and derive the transaction type from
+the joined category.
 
