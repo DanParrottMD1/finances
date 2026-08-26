@@ -1,10 +1,13 @@
 from .extensions import db
 
+id_type = db.BigInteger().with_variant(db.Integer, "sqlite")
+
 
 class Category(db.Model):
     __tablename__ = "categories"
+    __table_args__ = (db.UniqueConstraint("description", "category_type"),)
 
-    id = db.Column(db.BigInteger, primary_key=True)
+    id = db.Column(id_type, primary_key=True)
     description = db.Column(db.String(100), nullable=False)
     category_type = db.Column(db.String(20), nullable=False)
 
@@ -19,12 +22,12 @@ class Category(db.Model):
 class Transaction(db.Model):
     __tablename__ = "transactions"
 
-    id = db.Column(db.BigInteger, primary_key=True)
+    id = db.Column(id_type, primary_key=True)
     amount = db.Column(db.Numeric(10, 2), nullable=False)
     transaction_date = db.Column(db.Date, nullable=False)
     description = db.Column(db.String(255), nullable=False)
     category_id = db.Column(
-        db.BigInteger,
+        id_type,
         db.ForeignKey("categories.id"),
         nullable=False,
     )
