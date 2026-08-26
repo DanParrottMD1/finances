@@ -9,6 +9,8 @@ infra/mariadb/secrets/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+backend/.coverage
+backend/htmlcov/
 
 # React / Node
 node_modules/
