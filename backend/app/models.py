@@ -25,10 +25,10 @@ class Transaction(db.Model):
     description = db.Column(db.String(255), nullable=False)
     category_id = db.Column(
         db.BigInteger,
-        db.ForeignKey('categories.id'),
+        db.ForeignKey("categories.id"),
         nullable=False,
     )
-    category = db.relationship('Category')
+    category = db.relationship("Category")
 
     def to_dict(self):
         return {
