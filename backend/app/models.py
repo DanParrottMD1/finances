@@ -1,10 +1,13 @@
 from .extensions import db
 
+id_type = db.BigInteger().with_variant(db.Integer, "sqlite")
+
 
 class Category(db.Model):
     __tablename__ = "categories"
+    __table_args__ = (db.UniqueConstraint("description", "category_type"),)
 
-    id = db.Column(db.BigInteger, primary_key=True)
+    id = db.Column(id_type, primary_key=True)
     description = db.Column(db.String(100), nullable=False)
     category_type = db.Column(db.String(20), nullable=False)
 
@@ -19,21 +22,21 @@ class Category(db.Model):
 class Transaction(db.Model):
     __tablename__ = "transactions"
 
-    id = db.Column(db.BigInteger, primary_key=True)
+    id = db.Column(id_type, primary_key=True)
     amount = db.Column(db.Numeric(10, 2), nullable=False)
     transaction_date = db.Column(db.Date, nullable=False)
-    description = db.Column(db.String(255), nullable=False)
+    description = db.Column(db.String(255), nullable=True)
     category_id = db.Column(
-        db.BigInteger,
-        db.ForeignKey('categories.id'),
+        id_type,
+        db.ForeignKey("categories.id"),
         nullable=False,
     )
-    category = db.relationship('Category')
+    category = db.relationship("Category")
 
     def to_dict(self):
         return {
             "id": self.id,
-            "amount": self.amount,
+            "amount": str(self.amount),
             "transaction_date": self.transaction_date.isoformat(),
             "description": self.description,
             "category_id": self.category_id,

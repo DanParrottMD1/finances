@@ -5,10 +5,13 @@ from .config import Config
 from .extensions import db
 
 
-def create_app():
+def create_app(test_config=None):
     """Create and configure the Flask application."""
     app = Flask(__name__)
     app.config.from_object(Config)
+
+    if test_config is not None:
+        app.config.update(test_config)
 
     allowed_origins = [
         origin.strip()
