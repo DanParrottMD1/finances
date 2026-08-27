@@ -30,10 +30,15 @@ def client(app):
 @pytest.fixture
 def categories(app):
     income = Category(description="Salary", category_type="income")
-    spending = Category(description="Food", category_type="spending")
-    db.session.add_all([income, spending])
+    food = Category(description="Food", category_type="spending")
+    rent = Category(description="Rent", category_type="spending")
+
+    db.session.add_all([income, food, rent])
     db.session.commit()
     return {
         "income": income,
-        "spending": spending,
+        "food": food,
+        "rent": rent,
+    }
+
     }

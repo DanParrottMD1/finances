@@ -1,4 +1,5 @@
 import pytest
+from app.models import Category
 
 
 def test_health_check(client):
@@ -8,20 +9,23 @@ def test_health_check(client):
     assert response.json == {"status": "ok"}
 
 
-def test_get_all_categories(categories, client):
+def test_get_all_categories(categories: dict[str, Category], client):
     response = client.get("/api/categories")
 
     assert response.status_code == 200
     data = response.json["data"]
 
-    assert len(data) == 2
+    assert len(data) == 3
+
     assert data[0]["description"] == categories["income"].description
     assert data[0]["category_type"] == "income"
-    assert data[1]["description"] == categories["spending"].description
+    assert data[1]["description"] == categories["food"].description
     assert data[1]["category_type"] == "spending"
+    assert data[2]["description"] == categories["rent"].description
+    assert data[2]["category_type"] == "spending"
 
 
-def test_get_income_categories(categories, client):
+def test_get_income_categories(categories: dict[str, Category], client):
     response = client.get("/api/categories?type=income")
 
     assert response.status_code == 200
@@ -32,15 +36,17 @@ def test_get_income_categories(categories, client):
     assert data[0]["category_type"] == "income"
 
 
-def test_get_spending_categories(categories, client):
+def test_get_spending_categories(categories: dict[str, Category], client):
     response = client.get("/api/categories?type=spending")
 
     assert response.status_code == 200
     data = response.json["data"]
 
-    assert len(data) == 1
-    assert data[0]["description"] == categories["spending"].description
+    assert len(data) == 2
+    assert data[0]["description"] == categories["food"].description
     assert data[0]["category_type"] == "spending"
+    assert data[1]["description"] == categories["rent"].description
+    assert data[1]["category_type"] == "spending"
 
 
 def test_get_invalid_category_type(client):
@@ -99,7 +105,7 @@ def test_create_spending_category(client):
         ),
     ],
 )
-def test_create_category_with_invalid_data(client, payload, expected_error):
+def test_create_category_with_invalid_data(client, payload: dict, expected_error: str):
     response = client.post("/api/categories", json=payload)
 
     assert response.status_code == 400
