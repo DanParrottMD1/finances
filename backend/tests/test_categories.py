@@ -85,6 +85,10 @@ def test_create_spending_category(client):
     [
         (None, "A JSON object is required."),
         (
+            {"category_type": "income"},
+            "description must be a string.",
+        ),
+        (
             {"description": 1, "category_type": "income"},
             "description must be a string.",
         ),
@@ -112,13 +116,12 @@ def test_create_category_with_invalid_data(client, payload: dict, expected_error
     assert response.json == {"error": expected_error}
 
 
-def test_create_category_that_already_exists(client):
+def test_create_category_that_already_exists(categories: dict[str, Category], client):
     response = client.post(
         "/api/categories", json={"description": "Salary", "category_type": "income"}
     )
 
-    assert response.status_code == 201
-    data = response.json["data"]
-
-    assert data["description"] == "Salary"
-    assert data["category_type"] == "income"
+    assert response.status_code == 409
+    assert response.json == {
+        "error": "A category with that description already exists."
+    }

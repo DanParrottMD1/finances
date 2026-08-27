@@ -25,7 +25,7 @@ class Transaction(db.Model):
     id = db.Column(id_type, primary_key=True)
     amount = db.Column(db.Numeric(10, 2), nullable=False)
     transaction_date = db.Column(db.Date, nullable=False)
-    description = db.Column(db.String(255), nullable=False)
+    description = db.Column(db.String(255), nullable=True)
     category_id = db.Column(
         id_type,
         db.ForeignKey("categories.id"),
@@ -36,7 +36,7 @@ class Transaction(db.Model):
     def to_dict(self):
         return {
             "id": self.id,
-            "amount": self.amount,
+            "amount": str(self.amount),
             "transaction_date": self.transaction_date.isoformat(),
             "description": self.description,
             "category_id": self.category_id,

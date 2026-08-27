@@ -1,7 +1,9 @@
+from datetime import date
+
 import pytest
 from app import create_app
 from app.extensions import db
-from app.models import Category
+from app.models import Category, Transaction
 
 
 @pytest.fixture
@@ -41,4 +43,31 @@ def categories(app):
         "rent": rent,
     }
 
+
+@pytest.fixture
+def transactions(categories):
+    meal = Transaction(
+        amount="100",
+        transaction_date=date(2026, 8, 2),
+        category_id=categories["food"].id,
+        description="Dinner at the restaurant",
+    )
+    income = Transaction(
+        amount="2000.00",
+        transaction_date=date(2026, 8, 1),
+        category_id=categories["income"].id,
+        description="August Income",
+    )
+    rent = Transaction(
+        amount="1000.00",
+        transaction_date=date(2026, 8, 3),
+        category_id=categories["rent"].id,
+        description="Rent for August",
+    )
+    db.session.add_all([meal, income, rent])
+    db.session.commit()
+    return {
+        "meal": meal,
+        "income": income,
+        "rent": rent,
     }

@@ -70,8 +70,10 @@ def create_transaction():
 
     # Validate amount
     raw_amount = data.get("amount")
-    if isinstance(raw_amount, bool) or raw_amount is None:
+    if raw_amount is None:
         return jsonify({"error": "amount is required."}), 400
+    if isinstance(raw_amount, bool):
+        return jsonify({"error": "amount must be a valid decimal value."}), 400
 
     try:
         amount = Decimal(str(raw_amount))
@@ -84,8 +86,8 @@ def create_transaction():
     if amount.as_tuple().exponent < -2:
         return jsonify({"error": "amount must have at most 2 decimal places."}), 400
 
-    if amount > Decimal("9999999999.99"):
-        return jsonify({"error": "amount must be less than 10 billion."}), 400
+    if amount > Decimal("99999999.99"):
+        return jsonify({"error": "amount too large."}), 400
 
     # Validate transaction_date
     raw_date = data.get("transaction_date")
@@ -106,7 +108,12 @@ def create_transaction():
 
     # Validate category_id
     category_id = data.get("category_id")
-    if not isinstance(category_id, int) or category_id <= 0:
+    if (
+        category_id is None
+        or isinstance(category_id, bool)
+        or not isinstance(category_id, int)
+        or category_id <= 0
+    ):
         return jsonify({"error": "category_id must be a positive integer."}), 400
 
     category = db.session.get(Category, category_id)
