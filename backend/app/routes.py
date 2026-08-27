@@ -24,26 +24,42 @@ def health_check():
     return jsonify({"status": "ok"})
 
 
+def extract_category_description(data: dict) -> str:
+    description = data.get("description")
+    if not isinstance(description, str):
+        raise TypeError("description must be a string.")
+
+    description = description.strip()
+    if not description:
+        raise ValueError("description cannot be blank.")
+    if len(description) > 100:
+        raise ValueError("description cannot exceed 100 characters.")
+
+    return description
+
+
+def extract_category_type(data: dict) -> str:
+    category_type = data.get("category_type")
+
+    if not isinstance(category_type, str):
+        raise TypeError("category_type must be a string.")
+    if category_type not in CATEGORY_TYPES:
+        raise ValueError("category_type must be income or spending.")
+
+    return category_type
+
+
 def create_category():
     data = request.get_json(silent=True)
 
     if not isinstance(data, dict):
         return jsonify({"error": "A JSON object is required."}), 400
 
-    description = data.get("description")
-    if not isinstance(description, str):
-        return jsonify({"error": "description must be a string."}), 400
-
-    description = description.strip()
-    if not description:
-        return jsonify({"error": "description cannot be blank."}), 400
-
-    if len(description) > 100:
-        return jsonify({"error": "description cannot exceed 100 characters."}), 400
-
-    category_type = data.get("category_type")
-    if category_type not in CATEGORY_TYPES:
-        return jsonify({"error": "category_type must be income or spending."}), 400
+    try:
+        description = extract_category_description(data)
+        category_type = extract_category_type(data)
+    except (TypeError, ValueError) as e:
+        return jsonify({"error": str(e)}), 400
 
     category = Category(
         description=description,
@@ -62,76 +78,91 @@ def create_category():
     return jsonify({"data": category.to_dict()}), 201
 
 
+def extract_transaction_amount(data: dict) -> Decimal:
+    amount = data.get("amount")
+
+    if amount is None:
+        raise TypeError("amount is required.")
+    if isinstance(amount, bool):
+        raise TypeError("amount must be a valid decimal value.")
+    try:
+        amount = Decimal(str(amount))
+    except (InvalidOperation, ValueError):
+        raise ValueError("amount must be a valid decimal value.")
+    if not amount.is_finite() or amount <= 0:
+        raise ValueError("amount must be greater than 0.")
+    if amount.as_tuple().exponent < -2:
+        raise ValueError("amount must have at most 2 decimal places.")
+    if amount > Decimal("99999999.99"):
+        raise ValueError("amount too large.")
+
+    return amount
+
+
+def extract_transaction_date(data: dict) -> date:
+    raw_date = data.get("transaction_date")
+    if not isinstance(raw_date, str):
+        raise TypeError("transaction_date must have the format YYYY-MM-DD.")
+
+    try:
+        transaction_date = date.fromisoformat(raw_date)
+    except ValueError:
+        raise ValueError("transaction_date must have the format YYYY-MM-DD.")
+    if transaction_date > date.today():
+        raise ValueError("transaction_date cannot be in the future.")
+
+    return transaction_date
+
+
+def extract_transaction_category_id(data: dict) -> int:
+    category_id = data.get("category_id")
+
+    if category_id is None:
+        raise TypeError("category_id is required.")
+    if isinstance(category_id, bool):
+        raise TypeError("category_id must be a positive integer.")
+    if not isinstance(category_id, int):
+        raise TypeError("category_id must be a positive integer.")
+    if category_id <= 0:
+        raise ValueError("category_id must be a positive integer.")
+
+    return category_id
+
+
+def extract_transaction_description(data: dict) -> str:
+    description = data.get("description")
+    if description is None:
+        return None
+
+    if not isinstance(description, str):
+        raise TypeError("description must be a string.")
+
+    description = description.strip()
+    if not description:
+        return None
+    if len(description) > 255:
+        raise ValueError("description cannot exceed 255 characters.")
+
+    return description
+
+
 def create_transaction():
     data = request.get_json(silent=True)
 
     if not isinstance(data, dict):
         return jsonify({"error": "A JSON object is required."}), 400
 
-    # Validate amount
-    raw_amount = data.get("amount")
-    if raw_amount is None:
-        return jsonify({"error": "amount is required."}), 400
-    if isinstance(raw_amount, bool):
-        return jsonify({"error": "amount must be a valid decimal value."}), 400
-
     try:
-        amount = Decimal(str(raw_amount))
-    except (InvalidOperation, ValueError):
-        return jsonify({"error": "amount must be a valid decimal value."}), 400
-
-    if not amount.is_finite() or amount <= 0:
-        return jsonify({"error": "amount must be greater than 0."}), 400
-
-    if amount.as_tuple().exponent < -2:
-        return jsonify({"error": "amount must have at most 2 decimal places."}), 400
-
-    if amount > Decimal("99999999.99"):
-        return jsonify({"error": "amount too large."}), 400
-
-    # Validate transaction_date
-    raw_date = data.get("transaction_date")
-    if not isinstance(raw_date, str):
-        return jsonify(
-            {"error": "transaction_date must have the format YYYY-MM-DD."}
-        ), 400
-
-    try:
-        transaction_date = date.fromisoformat(raw_date)
-    except ValueError:
-        return jsonify(
-            {"error": "transaction_date must have the format YYYY-MM-DD."}
-        ), 400
-
-    if transaction_date > date.today():
-        return jsonify({"error": "transaction_date cannot be in the future."}), 400
-
-    # Validate category_id
-    category_id = data.get("category_id")
-    if (
-        category_id is None
-        or isinstance(category_id, bool)
-        or not isinstance(category_id, int)
-        or category_id <= 0
-    ):
-        return jsonify({"error": "category_id must be a positive integer."}), 400
+        amount = extract_transaction_amount(data)
+        transaction_date = extract_transaction_date(data)
+        description = extract_transaction_description(data)
+        category_id = extract_transaction_category_id(data)
+    except (TypeError, ValueError) as e:
+        return jsonify({"error": str(e)}), 400
 
     category = db.session.get(Category, category_id)
     if category is None:
         return jsonify({"error": "The selected category does not exist."}), 404
-
-    # Validate description
-    description = data.get("description")
-    if description is not None:
-        if not isinstance(description, str):
-            return jsonify({"error": "description must be a string."}), 400
-
-        description = description.strip()
-        if len(description) > 255:
-            return jsonify({"error": "description cannot exceed 255 characters."}), 400
-
-        if not description:
-            description = None
 
     transaction = Transaction(
         amount=amount,

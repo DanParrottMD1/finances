@@ -218,7 +218,7 @@ def _valid_transaction() -> dict:
         ),
         (
             {k: v for k, v in _valid_transaction().items() if k != "category_id"},
-            "category_id must be a positive integer.",
+            "category_id is required.",
         ),
         (
             _valid_transaction() | {"category_id": True},
