@@ -528,3 +528,22 @@ def test_update_partially_valid_leaves_transaction_unchanged(
     assert response.status_code == 400
     after = db.session.get(Transaction, before.id)
     _assert_transaction(before, after.to_dict())
+
+
+def test_delete_transaction(client, transactions: dict[str, Transaction]):
+    response = client.delete(
+        f"/api/transactions/{transactions['rent'].id}",
+    )
+    assert response.status_code == 204
+    assert response.data == b""
+
+    after = db.session.get(Transaction, transactions["rent"].id)
+    assert after is None
+
+
+def test_delete_non_existent_transaction(client):
+    response = client.delete(
+        "/api/transactions/99",
+    )
+    assert response.status_code == 404
+    assert response.json == {"error": "The selected transaction does not exist."}

@@ -185,3 +185,22 @@ def update_transaction(transaction_id: int):
         ), 500
 
     return jsonify({"data": transaction.to_dict()}), 200
+
+
+@api.delete("/transactions/<int:transaction_id>")
+def delete_transaction(transaction_id: int):
+    transaction = db.session.get(Transaction, transaction_id)
+    if transaction is None:
+        return jsonify({"error": "The selected transaction does not exist."}), 404
+
+    db.session.delete(transaction)
+
+    try:
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        return jsonify(
+            {"error": "An error occurred while deleting the transaction."}
+        ), 500
+
+    return "", 204
