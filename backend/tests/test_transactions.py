@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 
 import pytest
+from app.extensions import db
 from app.models import Category, Transaction
 
 
@@ -259,3 +260,271 @@ def test_create_transaction_with_invalid_category_id(
     )
     assert response.status_code == 404
     assert response.json == {"error": "The selected category does not exist."}
+
+
+def test_update_transaction_description(client, transactions: dict[str, Transaction]):
+    before = transactions["rent"]
+    expected = Transaction(
+        id=before.id,
+        amount=before.amount,
+        transaction_date=before.transaction_date,
+        category_id=before.category_id,
+        category=before.category,
+        description="New Description",
+    )
+
+    response = client.patch(
+        f"/api/transactions/{before.id}",
+        json={"description": expected.description},
+    )
+    assert response.status_code == 200
+    data = response.json["data"]
+
+    _assert_transaction(expected, data)
+
+    after = db.session.get(Transaction, before.id)
+    _assert_transaction(expected, after.to_dict())
+
+
+def test_update_transaction_with_empty_description(
+    client, transactions: dict[str, Transaction]
+):
+    before = transactions["rent"]
+    expected = Transaction(
+        id=before.id,
+        amount=before.amount,
+        transaction_date=before.transaction_date,
+        category_id=before.category_id,
+        category=before.category,
+        description=None,
+    )
+
+    response = client.patch(
+        f"/api/transactions/{before.id}",
+        json={"description": "   "},
+    )
+    assert response.status_code == 200
+    data = response.json["data"]
+
+    _assert_transaction(expected, data)
+
+    after = db.session.get(Transaction, before.id)
+    _assert_transaction(expected, after.to_dict())
+
+
+def test_update_transaction_amount(client, transactions: dict[str, Transaction]):
+    before = transactions["income"]
+    expected = Transaction(
+        id=before.id,
+        amount="1500.00",
+        transaction_date=before.transaction_date,
+        category_id=before.category_id,
+        category=before.category,
+        description=before.description,
+    )
+
+    response = client.patch(
+        f"/api/transactions/{before.id}",
+        json={"amount": expected.amount},
+    )
+    assert response.status_code == 200
+    data = response.json["data"]
+
+    _assert_transaction(expected, data)
+
+    after = db.session.get(Transaction, before.id)
+    _assert_transaction(expected, after.to_dict())
+
+
+def test_update_transaction_transaction_date(
+    client, transactions: dict[str, Transaction]
+):
+    before = transactions["rent"]
+    expected = Transaction(
+        id=before.id,
+        amount=before.amount,
+        transaction_date=date(2026, 8, 4),
+        category_id=before.category_id,
+        category=before.category,
+        description=before.description,
+    )
+
+    response = client.patch(
+        f"/api/transactions/{before.id}",
+        json={"transaction_date": "2026-08-04"},
+    )
+    assert response.status_code == 200
+    data = response.json["data"]
+
+    _assert_transaction(expected, data)
+
+    after = db.session.get(Transaction, before.id)
+    _assert_transaction(expected, after.to_dict())
+
+
+def test_update_transaction_category(
+    client, categories: dict[str, Category], transactions: dict[str, Transaction]
+):
+    before = transactions["meal"]
+    expected = Transaction(
+        id=before.id,
+        amount=before.amount,
+        transaction_date=before.transaction_date,
+        category_id=categories["rent"].id,
+        category=categories["rent"],
+        description=before.description,
+    )
+
+    response = client.patch(
+        f"/api/transactions/{before.id}",
+        json={"category_id": expected.category_id},
+    )
+    assert response.status_code == 200
+    data = response.json["data"]
+
+    _assert_transaction(expected, data)
+
+    after = db.session.get(Transaction, before.id)
+    _assert_transaction(expected, after.to_dict())
+
+
+def test_update_transaction_all_fields(
+    client, categories: dict[str, Category], transactions: dict[str, Transaction]
+):
+    before = transactions["rent"]
+    expected = Transaction(
+        id=before.id,
+        amount="1500.00",
+        transaction_date=date(2026, 8, 4),
+        category_id=categories["food"].id,
+        category=categories["food"],
+        description="New Description",
+    )
+
+    response = client.patch(
+        f"/api/transactions/{before.id}",
+        json={
+            "amount": expected.amount,
+            "transaction_date": "2026-08-04",
+            "category_id": expected.category_id,
+            "description": expected.description,
+        },
+    )
+    assert response.status_code == 200
+    data = response.json["data"]
+    _assert_transaction(expected, data)
+
+    after = db.session.get(Transaction, before.id)
+    _assert_transaction(expected, after.to_dict())
+
+
+def test_update_transaction_with_no_fields_to_update(
+    client, transactions: dict[str, Transaction]
+):
+    before = transactions["rent"]
+    response = client.patch(
+        f"/api/transactions/{before.id}",
+        json={},
+    )
+    assert response.status_code == 400
+    assert response.json == {"error": "No fields to update."}
+
+
+def test_update_transaction_with_invalid_field(
+    client, transactions: dict[str, Transaction]
+):
+    before = transactions["rent"]
+    response = client.patch(
+        f"/api/transactions/{before.id}",
+        json={"invalid": "value"},
+    )
+    assert response.status_code == 400
+    assert response.json == {"error": "Invalid field: invalid"}
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_error"),
+    [
+        (None, "A JSON object is required."),
+        ({"description": 99}, "description must be a string."),
+        ({"description": "x" * 256}, "description cannot exceed 255 characters."),
+        ({"amount": "invalid"}, "amount must be a valid decimal value."),
+        ({"amount": True}, "amount must be a valid decimal value."),
+        ({"amount": "-100.00"}, "amount must be greater than 0."),
+        ({"amount": "0"}, "amount must be greater than 0."),
+        ({"amount": "100.000"}, "amount must have at most 2 decimal places."),
+        ({"amount": "100000000.00"}, "amount too large."),
+        (
+            {"transaction_date": "not a date"},
+            "transaction_date must have the format YYYY-MM-DD.",
+        ),
+        (
+            {"transaction_date": str(date.today() + timedelta(days=1))},
+            "transaction_date cannot be in the future.",
+        ),
+        ({"category_id": True}, "category_id must be a positive integer."),
+        ({"category_id": 0}, "category_id must be a positive integer."),
+        ({"category_id": -1}, "category_id must be a positive integer."),
+    ],
+)
+def test_update_transaction_with_invalid_payload(
+    client, transactions: dict[str, Transaction], payload: dict, expected_error: str
+):
+    response = client.patch(
+        f"/api/transactions/{transactions['rent'].id}",
+        json=payload,
+    )
+    assert response.status_code == 400
+    assert response.json == {"error": expected_error}
+
+
+def test_update_transaction_with_invalid_category_id(
+    client, categories: dict[str, Category], transactions: dict[str, Transaction]
+):
+    response = client.patch(
+        f"/api/transactions/{transactions['rent'].id}",
+        json={"category_id": 99},
+    )
+    assert response.status_code == 404
+    assert response.json == {"error": "The selected category does not exist."}
+
+
+def test_update_non_existent_transaction(client):
+    response = client.patch(
+        "/api/transactions/99",
+        json={},
+    )
+    assert response.status_code == 404
+    assert response.json == {"error": "The selected transaction does not exist."}
+
+
+def test_update_failure_leaves_transaction_unchanged(
+    client, transactions: dict[str, Transaction]
+):
+    before = transactions["rent"]
+
+    response = client.patch(
+        f"/api/transactions/{before.id}",
+        json={"amount": "invalid"},
+    )
+    assert response.status_code == 400
+
+    after = db.session.get(Transaction, before.id)
+    _assert_transaction(before, after.to_dict())
+
+
+def test_update_partially_valid_leaves_transaction_unchanged(
+    client, transactions: dict[str, Transaction]
+):
+    before = transactions["rent"]
+    response = client.patch(
+        f"/api/transactions/{before.id}",
+        json={
+            "description": "x" * 256,
+            "amount": "invalid",
+            "transaction_date": "2026-08-04",
+        },
+    )
+    assert response.status_code == 400
+    after = db.session.get(Transaction, before.id)
+    _assert_transaction(before, after.to_dict())

@@ -110,7 +110,7 @@ def create_transaction():
         db.session.rollback()
         return jsonify(
             {"error": "An error occurred while creating the transaction."}
-        ), 400
+        ), 500
 
     return jsonify({"data": transaction.to_dict()}), 201
 
@@ -137,3 +137,51 @@ def list_transactions():
 @api.post("/transactions")
 def create_transaction_route():
     return create_transaction()
+
+
+@api.patch("/transactions/<int:transaction_id>")
+def update_transaction(transaction_id: int):
+    data = request.get_json(silent=True)
+
+    transaction = db.session.get(Transaction, transaction_id)
+    if transaction is None:
+        return jsonify({"error": "The selected transaction does not exist."}), 404
+
+    if not isinstance(data, dict):
+        return jsonify({"error": "A JSON object is required."}), 400
+    if not data:
+        return jsonify({"error": "No fields to update."}), 400
+
+    ALLOWED_FIELDS = ["amount", "transaction_date", "description", "category_id"]
+    for field in data:
+        if field not in ALLOWED_FIELDS:
+            return jsonify({"error": f"Invalid field: {field}"}), 400
+
+    values = {}
+    try:
+        if "amount" in data:
+            values["amount"] = extract_transaction_amount(data)
+        if "transaction_date" in data:
+            values["transaction_date"] = extract_transaction_date(data)
+        if "description" in data:
+            values["description"] = extract_transaction_description(data)
+        if "category_id" in data:
+            values["category_id"] = extract_transaction_category_id(data)
+            category = db.session.get(Category, values["category_id"])
+            if category is None:
+                return jsonify({"error": "The selected category does not exist."}), 404
+    except (TypeError, ValueError) as e:
+        return jsonify({"error": str(e)}), 400
+
+    for field, value in values.items():
+        setattr(transaction, field, value)
+
+    try:
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        return jsonify(
+            {"error": "An error occurred while updating the transaction."}
+        ), 500
+
+    return jsonify({"data": transaction.to_dict()}), 200
