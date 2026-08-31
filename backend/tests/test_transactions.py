@@ -94,11 +94,123 @@ def test_get_all_spending_transactions(transactions: dict[str, Transaction], cli
     _assert_transaction(transactions["meal"], data[1])
 
 
-def test_get_invalid_transaction_type(client):
-    response = client.get("/api/transactions?type=invalid")
+def test_get_transactions_filtered_by_category(
+    categories: dict[str, Category], transactions: dict[str, Transaction], client
+):
+    response = client.get(f"/api/transactions?category_id={categories['food'].id}")
+
+    assert response.status_code == 200
+    data = response.json["data"]
+    assert len(data) == 1
+    _assert_transaction(transactions["meal"], data[0])
+
+
+def test_get_transactions_filtered_by_date_range(
+    transactions: dict[str, Transaction], client
+):
+    response = client.get("/api/transactions?start_date=2026-08-01&end_date=2026-08-02")
+
+    assert response.status_code == 200
+    data = response.json["data"]
+    assert len(data) == 2
+    _assert_transaction(transactions["meal"], data[0])
+    _assert_transaction(transactions["income"], data[1])
+
+
+def test_get_transactions_with_description_search(
+    transactions: dict[str, Transaction], client
+):
+    response = client.get("/api/transactions?search=RESTAURANT")
+
+    assert response.status_code == 200
+    data = response.json["data"]
+    assert len(data) == 1
+    _assert_transaction(transactions["meal"], data[0])
+
+
+def test_get_transactions_with_multiple_filters(
+    transactions: dict[str, Transaction], categories: dict[str, Category], client
+):
+    # Add some extra transactions to confirm the filters are working
+    extra_transactions = [
+        {  # Should be excluded by the date range filter
+            "amount": "100.00",
+            "transaction_date": "2026-08-03",
+            "category_id": categories["food"].id,
+            "description": "Restaurant Transaction",
+        },
+        {  # Should be excluded by the category filter
+            "amount": "100.00",
+            "transaction_date": "2026-08-02",
+            "category_id": categories["income"].id,
+            "description": "Refund from restaurant",
+        },
+        {  # Should be excluded by the search filter
+            "amount": "100.00",
+            "transaction_date": "2026-08-01",
+            "category_id": categories["food"].id,
+            "description": "Another Food Transaction",
+        },
+    ]
+    for payload in extra_transactions:
+        response = client.post("/api/transactions", json=payload)
+        assert response.status_code == 201
+
+    response = client.get(
+        f"/api/transactions"
+        f"?category_id={categories['food'].id}"
+        f"&start_date=2026-08-01"
+        f"&end_date=2026-08-02"
+        f"&search=RESTAURANT"
+    )
+
+    assert response.status_code == 200
+    data = response.json["data"]
+    assert len(data) == 1
+    _assert_transaction(transactions["meal"], data[0])
+
+
+@pytest.mark.parametrize(
+    ("query_string", "expected_error"),
+    [
+        ("type=invalid", "category_type must be income or spending."),
+        ("type=", "category_type must be income or spending."),
+        ("category_id=abc", "category_id must be a positive integer."),
+        ("category_id=0", "category_id must be a positive integer."),
+        ("category_id=-1", "category_id must be a positive integer."),
+        (
+            "start_date=01-08-2026",
+            "start_date must have the format YYYY-MM-DD.",
+        ),
+        (
+            "end_date=tomorrow",
+            "end_date must have the format YYYY-MM-DD.",
+        ),
+        (
+            "start_date=2026-08-03&end_date=2026-08-01",
+            "start_date must be before end_date.",
+        ),
+        ("search=", "search cannot be blank."),
+        ("search=%20%20%20", "search cannot be blank."),
+    ],
+)
+def test_list_transactions_with_invalid_filters(
+    client, query_string: str, expected_error: str
+):
+    response = client.get(f"/api/transactions?{query_string}")
 
     assert response.status_code == 400
-    assert response.json == {"error": "category_type must be income or spending."}
+    assert response.json == {"error": expected_error}
+
+
+def test_list_transactions_with_unknown_query_parameters(client):
+    response = client.get("/api/transactions?apple=1&banana=2")
+
+    assert response.status_code == 400
+    error_msg = response.json.get("error", "")
+    assert error_msg.startswith("Unknown query parameters: ")
+    assert "apple" in error_msg
+    assert "banana" in error_msg
 
 
 def test_create_spending_transaction(categories: dict[str, Category], client):

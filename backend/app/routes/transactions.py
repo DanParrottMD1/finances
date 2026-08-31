@@ -115,18 +115,84 @@ def create_transaction():
     return jsonify({"data": transaction.to_dict()}), 201
 
 
+def extract_query_positive_integer(name: str, default=None) -> int:
+    raw_value = request.args.get(name)
+    if raw_value is None:
+        return default
+
+    try:
+        value = int(raw_value)
+    except (ValueError, TypeError):
+        raise TypeError(f"{name} must be a positive integer.")
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive integer.")
+
+    return value
+
+
+def extract_query_date(name: str) -> date:
+    raw_value = request.args.get(name)
+    if raw_value is None:
+        return None
+
+    try:
+        return date.fromisoformat(raw_value)
+    except (ValueError, TypeError):
+        raise TypeError(f"{name} must have the format YYYY-MM-DD.")
+
+
 @api.get("/transactions")
 def list_transactions():
-    category_type = request.args.get("type")
-
-    query = Transaction.query.order_by(
-        Transaction.transaction_date.desc(),
-        Transaction.id.desc(),
+    QUERY_PARAMETERS = set[str](
+        [
+            "type",
+            "category_id",
+            "start_date",
+            "end_date",
+            "search",
+        ]
     )
+
+    unknown_parameters = set(request.args) - QUERY_PARAMETERS
+    if unknown_parameters:
+        return jsonify(
+            {"error": f"Unknown query parameters: {', '.join(unknown_parameters)}"}
+        ), 400
+
+    category_type = request.args.get("type")
+    if category_type is not None and category_type not in CATEGORY_TYPES:
+        return jsonify({"error": "category_type must be income or spending."}), 400
+
+    try:
+        category_id = extract_query_positive_integer("category_id")
+        start_date = extract_query_date("start_date")
+        end_date = extract_query_date("end_date")
+    except (TypeError, ValueError) as e:
+        return jsonify({"error": str(e)}), 400
+
+    if start_date is not None and end_date is not None and start_date > end_date:
+        return jsonify({"error": "start_date must be before end_date."}), 400
+
+    search = request.args.get("search")
+    if search is not None:
+        search = search.strip()
+        if not search:
+            return jsonify({"error": "search cannot be blank."}), 400
+
+    query = Transaction.query
+
     if category_type is not None:
-        if category_type not in CATEGORY_TYPES:
-            return jsonify({"error": "category_type must be income or spending."}), 400
         query = query.join(Category).filter(Category.category_type == category_type)
+    if category_id is not None:
+        query = query.filter(Transaction.category_id == category_id)
+    if start_date is not None:
+        query = query.filter(Transaction.transaction_date >= start_date)
+    if end_date is not None:
+        query = query.filter(Transaction.transaction_date <= end_date)
+    if search is not None:
+        query = query.filter(Transaction.description.ilike(f"%{search}%"))
+
+    query = query.order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
 
     transactions = query.all()
     return jsonify(
