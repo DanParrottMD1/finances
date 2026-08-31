@@ -1,7 +1,6 @@
 from datetime import date, timedelta
 
 import pytest
-from app.extensions import db
 from app.models import Category, Transaction
 
 
@@ -12,6 +11,18 @@ def _assert_transaction(transaction: Transaction, data: dict):
     assert data["category_id"] == dict_transaction["category_id"]
     assert data["category"] == dict_transaction["category"]
     assert data["description"] == dict_transaction["description"]
+
+
+def _list_transactions(client) -> list[dict]:
+    response = client.get("/api/transactions")
+    assert response.status_code == 200
+    return response.json["data"]
+
+
+def _get_transaction(client, transaction_id: int) -> dict:
+    return next(
+        item for item in _list_transactions(client) if item["id"] == transaction_id
+    )
 
 
 def test_get_all_transactions(transactions: dict[str, Transaction], client):
@@ -282,8 +293,8 @@ def test_update_transaction_description(client, transactions: dict[str, Transact
 
     _assert_transaction(expected, data)
 
-    after = db.session.get(Transaction, before.id)
-    _assert_transaction(expected, after.to_dict())
+    after = _get_transaction(client, before.id)
+    _assert_transaction(expected, after)
 
 
 def test_update_transaction_with_empty_description(
@@ -308,8 +319,8 @@ def test_update_transaction_with_empty_description(
 
     _assert_transaction(expected, data)
 
-    after = db.session.get(Transaction, before.id)
-    _assert_transaction(expected, after.to_dict())
+    after = _get_transaction(client, before.id)
+    _assert_transaction(expected, after)
 
 
 def test_update_transaction_amount(client, transactions: dict[str, Transaction]):
@@ -332,8 +343,8 @@ def test_update_transaction_amount(client, transactions: dict[str, Transaction])
 
     _assert_transaction(expected, data)
 
-    after = db.session.get(Transaction, before.id)
-    _assert_transaction(expected, after.to_dict())
+    after = _get_transaction(client, before.id)
+    _assert_transaction(expected, after)
 
 
 def test_update_transaction_transaction_date(
@@ -358,8 +369,8 @@ def test_update_transaction_transaction_date(
 
     _assert_transaction(expected, data)
 
-    after = db.session.get(Transaction, before.id)
-    _assert_transaction(expected, after.to_dict())
+    after = _get_transaction(client, before.id)
+    _assert_transaction(expected, after)
 
 
 def test_update_transaction_category(
@@ -384,8 +395,8 @@ def test_update_transaction_category(
 
     _assert_transaction(expected, data)
 
-    after = db.session.get(Transaction, before.id)
-    _assert_transaction(expected, after.to_dict())
+    after = _get_transaction(client, before.id)
+    _assert_transaction(expected, after)
 
 
 def test_update_transaction_all_fields(
@@ -414,8 +425,8 @@ def test_update_transaction_all_fields(
     data = response.json["data"]
     _assert_transaction(expected, data)
 
-    after = db.session.get(Transaction, before.id)
-    _assert_transaction(expected, after.to_dict())
+    after = _get_transaction(client, before.id)
+    _assert_transaction(expected, after)
 
 
 def test_update_transaction_with_no_fields_to_update(
@@ -504,6 +515,7 @@ def test_update_failure_leaves_transaction_unchanged(
     client, transactions: dict[str, Transaction]
 ):
     before = transactions["rent"]
+    original = before.to_dict()
 
     response = client.patch(
         f"/api/transactions/{before.id}",
@@ -511,14 +523,15 @@ def test_update_failure_leaves_transaction_unchanged(
     )
     assert response.status_code == 400
 
-    after = db.session.get(Transaction, before.id)
-    _assert_transaction(before, after.to_dict())
+    after = _get_transaction(client, before.id)
+    assert after == original
 
 
 def test_update_partially_valid_leaves_transaction_unchanged(
     client, transactions: dict[str, Transaction]
 ):
     before = transactions["rent"]
+    original = before.to_dict()
     response = client.patch(
         f"/api/transactions/{before.id}",
         json={
@@ -528,8 +541,8 @@ def test_update_partially_valid_leaves_transaction_unchanged(
         },
     )
     assert response.status_code == 400
-    after = db.session.get(Transaction, before.id)
-    _assert_transaction(before, after.to_dict())
+    after = _get_transaction(client, before.id)
+    assert after == original
 
 
 def test_delete_transaction(client, transactions: dict[str, Transaction]):
@@ -539,8 +552,8 @@ def test_delete_transaction(client, transactions: dict[str, Transaction]):
     assert response.status_code == 204
     assert response.data == b""
 
-    after = db.session.get(Transaction, transactions["rent"].id)
-    assert after is None
+    remaining_ids = [item["id"] for item in _list_transactions(client)]
+    assert transactions["rent"].id not in remaining_ids
 
 
 def test_delete_non_existent_transaction(client):
