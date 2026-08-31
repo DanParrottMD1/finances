@@ -170,6 +170,145 @@ def test_get_transactions_with_multiple_filters(
     _assert_transaction(transactions["meal"], data[0])
 
 
+def test_get_transactions_with_filters_result_in_no_transactions(client):
+    response = client.get("/api/transactions?category_id=9999999999")
+    assert response.status_code == 200
+    assert response.json["data"] == []
+    assert response.json["pagination"] == {
+        "page": 1,
+        "per_page": 20,
+        "total_items": 0,
+        "total_pages": 0,
+        "has_next": False,
+        "has_previous": False,
+    }
+
+
+def test_get_transactions_with_pagination(transactions: dict[str, Transaction], client):
+    response = client.get("/api/transactions?page=1&per_page=2")
+    assert response.status_code == 200
+    assert len(response.json["data"]) == 2
+    assert [item["id"] for item in response.json["data"]] == [
+        transactions["rent"].id,
+        transactions["meal"].id,
+    ]
+    assert response.json["pagination"] == {
+        "page": 1,
+        "per_page": 2,
+        "total_items": 3,
+        "total_pages": 2,
+        "has_next": True,
+        "has_previous": False,
+    }
+
+    response = client.get("/api/transactions?page=2&per_page=2")
+    assert response.status_code == 200
+    assert len(response.json["data"]) == 1
+    assert [item["id"] for item in response.json["data"]] == [
+        transactions["income"].id,
+    ]
+    assert response.json["pagination"] == {
+        "page": 2,
+        "per_page": 2,
+        "total_items": 3,
+        "total_pages": 2,
+        "has_next": False,
+        "has_previous": True,
+    }
+
+
+def test_get_transactions_with_pagination_and_filters(
+    categories: dict[str, Category], transactions: dict[str, Transaction], client
+):
+    # Add some extra transactions so there are multiple pages
+    extra_transactions = [
+        {
+            "amount": "100.00",
+            "transaction_date": "2026-08-03",
+            "category_id": categories["food"].id,
+            "description": "Restaurant Transaction",
+        },
+        {
+            "amount": "100.00",
+            "transaction_date": "2026-08-01",
+            "category_id": categories["food"].id,
+            "description": "Another Food Transaction",
+        },
+    ]
+    for payload in extra_transactions:
+        response = client.post("/api/transactions", json=payload)
+        assert response.status_code == 201
+
+    response = client.get(
+        f"/api/transactions?category_id={categories['food'].id}&page=1&per_page=2"
+    )
+
+    assert response.status_code == 200
+    assert len(response.json["data"]) == 2
+    assert [item["description"] for item in response.json["data"]] == [
+        "Restaurant Transaction",
+        "Dinner at the restaurant",
+    ]
+    assert response.json["pagination"] == {
+        "page": 1,
+        "per_page": 2,
+        "total_items": 3,
+        "total_pages": 2,
+        "has_next": True,
+        "has_previous": False,
+    }
+
+    response = client.get(
+        f"/api/transactions?category_id={categories['food'].id}&page=2&per_page=2"
+    )
+
+    assert response.status_code == 200
+    assert len(response.json["data"]) == 1
+    assert [item["description"] for item in response.json["data"]] == [
+        "Another Food Transaction",
+    ]
+    assert response.json["pagination"] == {
+        "page": 2,
+        "per_page": 2,
+        "total_items": 3,
+        "total_pages": 2,
+        "has_next": False,
+        "has_previous": True,
+    }
+
+
+def test_pagination_response_with_no_pagination_parameters(
+    transactions: dict[str, Transaction], client
+):
+    response = client.get("/api/transactions")
+    assert response.status_code == 200
+
+    assert response.json["pagination"] == {
+        "page": 1,
+        "per_page": 20,
+        "total_items": 3,
+        "total_pages": 1,
+        "has_next": False,
+        "has_previous": False,
+    }
+
+
+def test_pagination_response_with_page_out_of_range(
+    transactions: dict[str, Transaction], client
+):
+    response = client.get("/api/transactions?page=9999999999")
+    assert response.status_code == 200
+    assert response.json["data"] == []
+    assert response.json["pagination"] == {
+        "page": 9999999999,
+        "per_page": 20,
+        "total_items": 3,
+        "total_pages": 1,
+        "has_next": False,
+        "has_previous": True,
+    }
+
+
 @pytest.mark.parametrize(
     ("query_string", "expected_error"),
     [
@@ -192,6 +331,11 @@ def test_get_transactions_with_multiple_filters(
         ),
         ("search=", "search cannot be blank."),
         ("search=%20%20%20", "search cannot be blank."),
+        ("page=0", "page must be a positive integer."),
+        ("page=-1", "page must be a positive integer."),
+        ("page=abc", "page must be a positive integer."),
+        ("per_page=0", "per_page must be a positive integer."),
+        ("per_page=101", "per_page must be at most 100."),
     ],
 )
 def test_list_transactions_with_invalid_filters(

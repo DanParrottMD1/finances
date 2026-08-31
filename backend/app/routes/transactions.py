@@ -150,8 +150,13 @@ def list_transactions():
             "start_date",
             "end_date",
             "search",
+            "page",
+            "per_page",
         ]
     )
+
+    DEFAULT_PAGE_SIZE = 20
+    MAX_PAGE_SIZE = 100
 
     unknown_parameters = set(request.args) - QUERY_PARAMETERS
     if unknown_parameters:
@@ -167,11 +172,16 @@ def list_transactions():
         category_id = extract_query_positive_integer("category_id")
         start_date = extract_query_date("start_date")
         end_date = extract_query_date("end_date")
+        page = extract_query_positive_integer("page", 1)
+        per_page = extract_query_positive_integer("per_page", DEFAULT_PAGE_SIZE)
     except (TypeError, ValueError) as e:
         return jsonify({"error": str(e)}), 400
 
     if start_date is not None and end_date is not None and start_date > end_date:
         return jsonify({"error": "start_date must be before end_date."}), 400
+
+    if per_page > MAX_PAGE_SIZE:
+        return jsonify({"error": f"per_page must be at most {MAX_PAGE_SIZE}."}), 400
 
     search = request.args.get("search")
     if search is not None:
@@ -194,9 +204,19 @@ def list_transactions():
 
     query = query.order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
 
-    transactions = query.all()
+    transactions = query.paginate(page=page, per_page=per_page, error_out=False)
     return jsonify(
-        {"data": [transaction.to_dict() for transaction in transactions]}
+        {
+            "data": [transaction.to_dict() for transaction in transactions],
+            "pagination": {
+                "page": transactions.page,
+                "per_page": transactions.per_page,
+                "total_items": transactions.total,
+                "total_pages": transactions.pages,
+                "has_next": transactions.has_next,
+                "has_previous": transactions.has_prev,
+            },
+        }
     ), 200
 
 
