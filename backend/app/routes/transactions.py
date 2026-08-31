@@ -115,22 +115,108 @@ def create_transaction():
     return jsonify({"data": transaction.to_dict()}), 201
 
 
+def extract_query_positive_integer(name: str, default=None) -> int:
+    raw_value = request.args.get(name)
+    if raw_value is None:
+        return default
+
+    try:
+        value = int(raw_value)
+    except (ValueError, TypeError):
+        raise TypeError(f"{name} must be a positive integer.")
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive integer.")
+
+    return value
+
+
+def extract_query_date(name: str) -> date:
+    raw_value = request.args.get(name)
+    if raw_value is None:
+        return None
+
+    try:
+        return date.fromisoformat(raw_value)
+    except (ValueError, TypeError):
+        raise TypeError(f"{name} must have the format YYYY-MM-DD.")
+
+
 @api.get("/transactions")
 def list_transactions():
-    category_type = request.args.get("type")
-
-    query = Transaction.query.order_by(
-        Transaction.transaction_date.desc(),
-        Transaction.id.desc(),
+    QUERY_PARAMETERS = set[str](
+        [
+            "type",
+            "category_id",
+            "start_date",
+            "end_date",
+            "search",
+            "page",
+            "per_page",
+        ]
     )
-    if category_type is not None:
-        if category_type not in CATEGORY_TYPES:
-            return jsonify({"error": "category_type must be income or spending."}), 400
-        query = query.join(Category).filter(Category.category_type == category_type)
 
-    transactions = query.all()
+    DEFAULT_PAGE_SIZE = 20
+    MAX_PAGE_SIZE = 100
+
+    unknown_parameters = set(request.args) - QUERY_PARAMETERS
+    if unknown_parameters:
+        return jsonify(
+            {"error": f"Unknown query parameters: {', '.join(unknown_parameters)}"}
+        ), 400
+
+    category_type = request.args.get("type")
+    if category_type is not None and category_type not in CATEGORY_TYPES:
+        return jsonify({"error": "category_type must be income or spending."}), 400
+
+    try:
+        category_id = extract_query_positive_integer("category_id")
+        start_date = extract_query_date("start_date")
+        end_date = extract_query_date("end_date")
+        page = extract_query_positive_integer("page", 1)
+        per_page = extract_query_positive_integer("per_page", DEFAULT_PAGE_SIZE)
+    except (TypeError, ValueError) as e:
+        return jsonify({"error": str(e)}), 400
+
+    if start_date is not None and end_date is not None and start_date > end_date:
+        return jsonify({"error": "start_date must be before end_date."}), 400
+
+    if per_page > MAX_PAGE_SIZE:
+        return jsonify({"error": f"per_page must be at most {MAX_PAGE_SIZE}."}), 400
+
+    search = request.args.get("search")
+    if search is not None:
+        search = search.strip()
+        if not search:
+            return jsonify({"error": "search cannot be blank."}), 400
+
+    query = Transaction.query
+
+    if category_type is not None:
+        query = query.join(Category).filter(Category.category_type == category_type)
+    if category_id is not None:
+        query = query.filter(Transaction.category_id == category_id)
+    if start_date is not None:
+        query = query.filter(Transaction.transaction_date >= start_date)
+    if end_date is not None:
+        query = query.filter(Transaction.transaction_date <= end_date)
+    if search is not None:
+        query = query.filter(Transaction.description.ilike(f"%{search}%"))
+
+    query = query.order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
+
+    transactions = query.paginate(page=page, per_page=per_page, error_out=False)
     return jsonify(
-        {"data": [transaction.to_dict() for transaction in transactions]}
+        {
+            "data": [transaction.to_dict() for transaction in transactions],
+            "pagination": {
+                "page": transactions.page,
+                "per_page": transactions.per_page,
+                "total_items": transactions.total,
+                "total_pages": transactions.pages,
+                "has_next": transactions.has_next,
+                "has_previous": transactions.has_prev,
+            },
+        }
     ), 200
 
 
@@ -153,9 +239,9 @@ def update_transaction(transaction_id: int):
         return jsonify({"error": "No fields to update."}), 400
 
     ALLOWED_FIELDS = ["amount", "transaction_date", "description", "category_id"]
-    for field in data:
-        if field not in ALLOWED_FIELDS:
-            return jsonify({"error": f"Invalid field: {field}"}), 400
+    unknown_fields = set(data) - set(ALLOWED_FIELDS)
+    if unknown_fields:
+        return jsonify({"error": f"Invalid fields: {', '.join(unknown_fields)}"}), 400
 
     values = {}
     try:
