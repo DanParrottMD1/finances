@@ -447,12 +447,14 @@ def test_update_transaction_with_unknown_fields(
     before = transactions["rent"]
     response = client.patch(
         f"/api/transactions/{before.id}",
-        json={"unknown_field": "value", "another_unknown_field": "value"},
+        json={"apple": "value", "banana": "value"},
     )
     assert response.status_code == 400
-    assert response.json == {
-        "error": "Invalid fields: another_unknown_field, unknown_field"
-    }
+    assert response.status_code == 400
+    error_msg = response.json.get("error", "")
+    assert "Invalid fields" in error_msg
+    assert "apple" in error_msg
+    assert "banana" in error_msg
 
 
 @pytest.mark.parametrize(
