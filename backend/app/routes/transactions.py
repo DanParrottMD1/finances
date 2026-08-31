@@ -153,9 +153,9 @@ def update_transaction(transaction_id: int):
         return jsonify({"error": "No fields to update."}), 400
 
     ALLOWED_FIELDS = ["amount", "transaction_date", "description", "category_id"]
-    for field in data:
-        if field not in ALLOWED_FIELDS:
-            return jsonify({"error": f"Invalid field: {field}"}), 400
+    unknown_fields = set(data) - set(ALLOWED_FIELDS)
+    if unknown_fields:
+        return jsonify({"error": f"Invalid fields: {', '.join(unknown_fields)}"}), 400
 
     values = {}
     try:
